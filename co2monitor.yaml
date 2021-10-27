@@ -1,0 +1,181 @@
+substitutions:
+    postfix_name: '1'
+    device_verbose_name: "Name Not used yet"
+    base_name: co2_monitor
+    full_name: ${base_name}_${postfix_name}
+
+esphome:
+    name: ${full_name}
+    platform: ESP32
+    board: wemos_d1_mini32
+
+packages:
+    project: !include base/project.yaml
+    wifi: !include base/wifi.yaml
+    ota: !include base/ota.yaml
+    api: !include base/api.yaml
+
+logger:
+
+api:
+    reboot_timeout: 0s
+    services:
+      - service: mhz19_calibrate_zero
+        then:
+          - mhz19.calibrate_zero: my_mhz19_id
+uart:
+    rx_pin: D1
+    tx_pin: D2
+    baud_rate: 9600
+
+spi:
+    clk_pin: D5
+    mosi_pin: D7
+    miso_pin: D6
+
+output:
+  - platform: ledc
+    pin: D6
+    id: display_brightness
+
+light:
+  - platform: monochromatic
+    output: display_brightness
+    name: "${full_name} Display Backlight"
+    id: display_backlight
+    restore_mode: ALWAYS_ON
+
+sensor:
+  - platform: mhz19
+    id: my_mhz19_id
+    co2:
+        id: mhz19_co2
+        name: "MH-Z19 CO2 Value"
+        filters:
+          #- sliding_window_moving_average:
+          #      window_size: 5
+          #      send_every: 5
+        on_value:
+            then:
+                lambda: |-
+                  id(HistoryBuffer)[id(HistoryBufferCounter)] = x;
+                  id(HistoryBufferCounter) = (id(HistoryBufferCounter)+1)%id(HistoryBufferSize);
+
+
+    temperature:
+        id: mhz19_temp
+        name: "MH-Z19 Temperature"
+    update_interval: 60s
+    automatic_baseline_calibration: false
+    
+
+switch:
+  - platform: template
+    name: "MH-Z19 ABC"
+    optimistic: true
+    on_turn_on:
+        mhz19.abc_enable: my_mhz19_id
+    on_turn_off:
+        mhz19.abc_disable: my_mhz19_id
+
+
+globals:
+  - id: HistoryBufferSize
+    type: int
+    initial_value: '301'
+  - id: HistoryBuffer
+    type: int[301]
+  - id: HistoryBufferCounter
+    type: int
+    initial_value: '0'
+  - id: ScreenSizeX
+    type: int
+    initial_value: '320'
+  - id: ScreenSizeY
+    type: int
+    initial_value: '240'
+  - id: PixelOffsetLeft
+    type: int
+    initial_value: '10'
+
+font:
+  - file: "base/fonts/comic.ttf"
+    id: font_current_ppm
+    size: 40
+
+  - file: "base/fonts/comic.ttf"
+    id: font_minmax
+    size: 20
+
+  - file: "base/fonts/comic.ttf"
+    id: font_uint
+    size: 10
+display:
+  - platform: ili9341
+    model: TFT 2.4
+    cs_pin: D8
+    dc_pin: D4
+    led_pin: D6  ### see note below ###
+    rotation: 90°
+    #reset_pin: RST
+    lambda: |-
+        auto red = Color(255, 0, 0);
+        auto green = Color(0, 255, 0);
+        auto blue = Color(0, 0, 255);
+        auto white = Color(255, 255, 255);
+        auto black = Color(0, 0, 0);
+
+        unsigned int min_ppm = 0xFFFF;
+        unsigned int max_ppm = 0;
+
+        it.fill(black);
+        it.printf(0, 0, id(font_uint), white , "CO2");
+        it.printf(30, 0, id(font_current_ppm), green , "%.0f", id(mhz19_co2).state);
+
+        it.printf(300, 0, id(font_uint), white , "°C");
+        it.printf(250, 0, id(font_current_ppm), green , "%.0f", id(mhz19_temp).state);
+
+        it.line(id(PixelOffsetLeft)   , 70, id(ScreenSizeX)-id(PixelOffsetLeft)+1-1 , 70, blue);
+        it.line(id(PixelOffsetLeft)   , id(ScreenSizeY)-1, id(ScreenSizeX)-id(PixelOffsetLeft)+1-1 , id(ScreenSizeY)-1, blue);
+        for(auto i = 0;i < 6; i++)
+        {
+          it.line(i*60+id(PixelOffsetLeft)   , 70, i*60+id(PixelOffsetLeft) , id(ScreenSizeY), blue);
+        }
+        
+        for(auto i = 0;i < id(HistoryBufferSize); i++)
+        {
+          auto index = (id(HistoryBufferSize)-i+id(HistoryBufferCounter))%id(HistoryBufferSize);
+          auto col = green;
+          
+          if (id(HistoryBuffer)[index] <= 400)
+          col = green;
+          else if(id(HistoryBuffer)[index] >= 1500)
+          col = red;
+          else if (id(HistoryBuffer)[index] >= 950)
+          {
+            auto r = 255;
+            auto g = 255-(((id(HistoryBuffer)[index] - 950)*255) / (1500-950));
+            col = Color(r,g,0);
+          }
+          else
+          {
+            auto r = (((id(HistoryBuffer)[index] - 400)*255) / (950-400));
+            auto g = 255;
+            col = Color(r,g,0);
+          }
+
+          it.line(
+            (id(ScreenSizeX)-id(PixelOffsetLeft)+1)-i,
+            id(ScreenSizeY), 
+            (id(ScreenSizeX)-id(PixelOffsetLeft)+1)-i,
+            id(ScreenSizeY)-(id(HistoryBuffer)[index]/12), col);       
+
+            if(id(HistoryBuffer)[index] > max_ppm)
+            max_ppm = id(HistoryBuffer)[index];
+
+            if((id(HistoryBuffer)[index] < min_ppm) && (id(HistoryBuffer)[index]!= 0))
+            min_ppm = id(HistoryBuffer)[index];
+        }
+        it.printf(20, 40, id(font_minmax), blue , "Min  %.0i",min_ppm);
+        it.printf(210, 40, id(font_minmax), blue , "Max  %.0i",max_ppm);
+
