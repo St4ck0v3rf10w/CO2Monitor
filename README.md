@@ -1,4 +1,4 @@
 # CO2Monitor
 
-- remake from RaveGun Co2Monitor
-- ported from arduino to ESPHome
+- remake from  RaveGun/C02_LCD_Device_Git
+- ported from arduino/PIO to ESPHome
