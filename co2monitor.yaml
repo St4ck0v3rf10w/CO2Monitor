@@ -6,7 +6,8 @@ substitutions:
 
 esphome:
     name: ${full_name}
-    platform: ESP32
+
+esp32:
     board: wemos_d1_mini32
 
 packages:
@@ -31,7 +32,7 @@ uart:
 spi:
     clk_pin: D5
     mosi_pin: D7
-    miso_pin: D6
+ #   miso_pin: D8
 
 output:
   - platform: ledc
@@ -111,11 +112,13 @@ font:
     id: font_uint
     size: 10
 display:
-  - platform: ili9341
-    model: TFT 2.4
+  - platform: ili9xxx
+    invert_colors: false
+    model: ILI9341 #TFT 2.4
     cs_pin: D8
     dc_pin: D4
-    led_pin: D6  ### see note below ###
+    color_palette: 8BIT
+    #led_pin: D6  ### see note below ###
     rotation: 90°
     #reset_pin: RST
     lambda: |-
